@@ -1,0 +1,4 @@
+.DS_Store
+.claude*.zip
+scripts/clone-web/package-lock.json
+scripts/clone-web/pnpm-lock.yaml
