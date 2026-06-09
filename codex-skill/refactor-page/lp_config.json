@@ -1,0 +1,16 @@
+[
+  {
+    "key": "product_1_image",
+    "label": "产品1图片",
+    "type": "IMAGE",
+    "required": true,
+    "group": "商品区域"
+  },
+  {
+    "key": "product_1_cta",
+    "label": "产品1按钮跳转",
+    "type": "NEXT_LINK",
+    "required": true,
+    "group": "跳转区域"
+  }
+]

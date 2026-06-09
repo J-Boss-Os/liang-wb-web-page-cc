@@ -1,0 +1,4 @@
+interface:
+  display_name: "校验 Thymeleaf 页面"
+  short_description: "检查 Thymeleaf 模板语法和绑定"
+  default_prompt: "Use $validate-thymeleaf-page to verify a cloned Thymeleaf landing page for syntax and template binding errors."
