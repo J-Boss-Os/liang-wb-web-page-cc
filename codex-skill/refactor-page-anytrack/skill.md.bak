@@ -1,0 +1,195 @@
+---
+name: refactor-page
+description: 为落地页添加跟踪脚本、替换商品图片和跳转链接占位符、按模板生成 lp_config.json
+arguments: output-dir
+---
+
+# Refactor Page
+
+目标：把 `${CLAUDE_ROOT}/templates/${output-dir}` 下的落地页改造成可配置模板。只处理明确属于商品/广告跳转的图片和链接；不要为了“覆盖更多”而改导航、站点装饰图、社交链接、锚点、邮箱、电话、CSS/JS 资源或普通文章内链。
+
+本 skill 的输出必须满足：
+
+- 跳转链接占位符完整写成 `{{ads}}product_N_cta`。
+- 商品图片占位符写成 `{{product_N_image}}`。
+- 商品 Logo 占位符写成 `{{product_N_logo_image}}`。
+- `lp_config.json` 是无 BOM UTF-8 的标准 JSON 顶层数组，只包含指定字段，不写排序或默认值字段。
+- 禁止输出 `{{PRODUCT_LINK_1}}`、`PRODUCT_LINK_1`、`{{product_1_cta}}` 作为 href、`{{ads}}{{product_1_cta}}`、`{{ads}} product_1_cta` 或其他变体。
+
+## 1. 准备和脚本
+
+- 页面目录：`${CLAUDE_ROOT}/templates/${output-dir}`
+- 静态目录：`${CLAUDE_ROOT}/templates/${output-dir}/static`
+- 跟踪脚本来源：`${CLAUDE_ROOT}/.claude/skills/clone-page/ecommerce-ad-tracker.js`
+
+执行：
+
+```bash
+mkdir -p "${CLAUDE_ROOT}/templates/${output-dir}/static"
+cp "${CLAUDE_ROOT}/.claude/skills/clone-page/ecommerce-ad-tracker.js" "${CLAUDE_ROOT}/templates/${output-dir}/static/"
+```
+
+在 HTML 的 `</body>` 前添加一次，不要重复添加：
+
+```html
+<script src="./static/ecommerce-ad-tracker.js"></script>
+```
+
+## 2. 修改前必须先做产品映射
+
+先阅读 HTML 和截图，必须先找到页面的“标准商品榜单区”再建立产品编号。标准商品榜单区通常是 Top 5/Top 10 比较表、排行榜卡片、带 `#1`/`2`/`3` 排名徽标的商品列表，或者包含 score、price、Visit Site/Visit Amazon 按钮的连续商品块。
+
+产品编号只从标准商品榜单区产生：
+
+- 主商品：榜单里明确标记为 `#1`、`Top Pick`、`Best Overall`、`Winner`、`Recommended`、`Best ...` 的商品，必须编号为 `product_1`。
+- 次要商品：按榜单显示的排名顺序编号为 `product_2`、`product_3`、`product_4`。
+- Top 5、Top 10 这类页面，编号必须跟页面排名一致，例如第 1 名是 `product_1`，第 5 名是 `product_5`。
+- 如果页面有详情 review 区、弹窗、sticky bar、优惠券弹窗、hero 区，这些区域不能决定产品编号；它们只能继承标准商品榜单区里已经确定的产品编号。
+- 如果 DOM 顺序、图片文件名、链接出现顺序和榜单排名冲突，必须以页面可见排名/榜单语义为准。
+- 不要根据图片文件名排序，例如 `top1.jpg`、`top2.png`、`top2name.png` 可能来自原站素材命名，不一定等于商品排名。
+- 不要根据第一个出现的外链排序；弹窗、tracking、noscript 或隐藏 DOM 可能先出现，不能作为 product 顺序依据。
+
+每个产品记录这些信息：
+
+- 产品块范围：包含商品图片、标题、价格/卖点、按钮的最近父容器。
+- 页面可见排名或语义标签，例如 `#1 Best Pillow`、`2`、`3`、`Top Pick`。
+- 商品主图原始地址。
+- 商品 Logo 原始地址，仅在图片确实是品牌/商家 Logo 时记录。
+- 所有属于该产品的外部购买/广告跳转链接。
+- 该产品在桌面版、移动版、弹窗、sticky bar、详情 review 区、优惠券弹窗中的重复展示位置。
+
+同一个产品在多个位置重复出现时，必须使用同一组占位符。比如 product_1 的榜单卡片、详情评测区、优惠券弹窗、sticky bar 都使用 `{{product_1_image}}`、`{{product_1_logo_image}}` 和 `{{ads}}product_1_cta`。
+
+修改前先形成一个产品映射表，再按映射表改 HTML。映射表至少包含：
+
+```text
+product_1 = 标准榜单第 1 名 / 主商品 / 原始主图 / 原始 Logo / CTA 原始链接
+product_2 = 标准榜单第 2 名 / 次要商品 / 原始主图 / 原始 Logo(如有) / CTA 原始链接
+product_3 = 标准榜单第 3 名 / 次要商品 / 原始主图 / 原始 Logo(如有) / CTA 原始链接
+```
+
+如果无法确定某个商品在榜单里的排名，不要猜测；保留相关图片和链接原样，并在最终说明中标注。
+
+只有当图片或链接能归属到某个产品块时才替换。无法可靠判断归属时，保留原样，并在最终说明中写出原因。隐藏的移动端/桌面端重复 HTML 也要检查，不要只改当前可见区域。
+
+## 3. 占位符替换规则
+
+### 商品图片
+
+- 商品主图 `src` 替换为 `{{product_N_image}}`。
+- 同一产品有多张主图时，使用 `{{product_N_image}}`、`{{product_N_image_2}}`、`{{product_N_image_3}}`。
+- 同一商品主图在弹窗、sticky、review 详情、隐藏移动端/桌面端 DOM 中重复出现时，仍然使用同一个 `{{product_N_image}}`。
+- 不要替换 favicon、站点 Logo、评分星级、icon、背景纹理、作者头像、支付图标、社交图标、装饰图。
+
+### 商品 Logo
+
+- 只有明确是商品品牌/商家 Logo 的图片才替换为 `{{product_N_logo_image}}`。
+- 同一商品 Logo 在不同区域重复出现时，仍然使用同一个 `{{product_N_logo_image}}`。
+- 不要把站点页眉 Logo、媒体 Logo、认证徽章、评分图标误判为商品 Logo。
+
+### 外部产品链接
+
+- 所有属于同一产品的购买按钮、图片点击、标题点击、价格区域点击，都替换为同一个 `href="{{ads}}product_N_cta"`。
+- `{{ads}}product_N_cta` 是一个完整占位符整体，必须作为 `href` 的完整值。正确：`href="{{ads}}product_1_cta"`。错误：`href="{{product_1_cta}}"`、`href="{{ads}}{{product_1_cta}}"`、`href="{{ads}} product_1_cta"`、`href="{{PRODUCT_LINK_1}}"`。
+- 同一产品不要生成多个 CTA key，除非页面明确存在不同目的地，例如购买链接和优惠券链接。普通重复按钮仍然共用 `product_N_cta`。
+- 榜单卡片、图片链接、按钮链接、优惠券弹窗、sticky bar、详情 review 区的同一产品 CTA 必须共用同一个 `product_N_cta`。
+- 只替换外部商品/广告跳转链接，例如 Amazon、源站跳转、电商平台、联盟链接、带 `click`/`go`/`redirect`/`offer` 语义的跳转。
+- 不要替换 `#...`、`mailto:`、`tel:`、站内导航、隐私政策、条款、分享链接、CSS/JS/图片资源 URL、`<link rel="stylesheet">`、`<script src>`、favicon、tracking pixel。
+- 禁止用“所有外链都替换成第一个 CTA”的方式处理；必须按产品块归属分别替换为 `product_1_cta`、`product_2_cta` 等。
+
+### 编辑方式
+
+- 使用结构化理解和小范围手工修改 HTML。不要写一个全局正则或脚本把所有 `img`/`a` 批量替换掉。
+- 不要生成临时 `refactor.js` 之类的脚本去粗暴批量替换 Amazon、recoguid 或所有外链。若必须用脚本辅助，脚本只能执行已经人工确认的精确映射表，不能自行推断产品归属。
+- 保留原有 `alt`、`title`、`class`、`data-*` 等属性。
+- 保留非目标内容的原始 URL。
+
+## 4. 生成 `lp_config.json`
+
+参考模板文件：
+
+`${CLAUDE_ROOT}/.claude/skills/refactor-page/lp_config.json`
+
+模板只定义字段形状，不代表最终只能有两个字段。最终配置必须与 HTML 中实际使用的占位符一一对应。
+
+### 必须遵守的 JSON 规则
+
+- 输出文件位置：`${CLAUDE_ROOT}/templates/${output-dir}/lp_config.json`
+- 顶层必须是数组，不能是对象，不能是 `{ "products": [...] }`，不能是 `{ "value": [...] }`。
+- 文件必须是无 BOM UTF-8。写完后要用 Node `JSON.parse(fs.readFileSync(path, "utf8"))` 验证；如果因为 BOM 或其他字符报错，必须修正。
+- 每个占位符必须有且只有一个配置对象。
+- `key` 必须是不带 `{{`、`}}`、`ads}}` 的纯 key，例如 `product_1_image`、`product_1_cta`。
+- HTML 中出现 `{{product_1_image}}`，配置中必须有 `"key": "product_1_image"`。
+- HTML 中出现 `{{ads}}product_1_cta`，配置中必须有 `"key": "product_1_cta"`。
+- 配置中绝对不要写 `"key": "{{ads}}product_1_cta"`、`"key": "ads_product_1_cta"` 或 `"key": "{{PRODUCT_LINK_1}}"`。
+- 不要添加 HTML 没有使用的 key。
+- 不要编造原页面没有的产品、图片、按钮或默认值。
+- JSON 必须能被标准 JSON 解析器解析；不要包含注释、尾逗号、Markdown 代码块。
+
+### 字段格式
+
+每个对象只能使用这些字段：
+
+```json
+{
+  "key": "product_1_image",
+  "label": "产品1图片",
+  "type": "IMAGE",
+  "required": true,
+  "group": "商品区域"
+}
+```
+
+CTA 示例：
+
+```json
+{
+  "key": "product_1_cta",
+  "label": "产品1按钮跳转",
+  "type": "NEXT_LINK",
+  "required": true,
+  "group": "跳转区域"
+}
+```
+
+禁止添加其他字段，包括 `sortOrder`、`defaultValue`、`value`、`options`、`placeholder`、`products`、`id`、`link`、`image`。
+
+允许的 `type`：
+
+`TEXT`, `TEXTAREA`, `RICH_TEXT`, `NUMBER`, `BOOLEAN`, `SELECT`, `MULTI_SELECT`, `IMAGE`, `URL`, `DATE`, `NEXT_LINK`, `ARRAY_OBJECT`
+
+本 skill 通常只生成：
+
+- 图片占位符：`type` 使用 `IMAGE`，不要写 `defaultValue`。
+- Logo 占位符：`type` 使用 `IMAGE`，不要写 `defaultValue`。
+- CTA 占位符：`type` 使用 `NEXT_LINK`，不要写 `defaultValue`。
+- `lp_config.json` 不需要也不允许记录 `{{ads}}` 前缀；`{{ads}}` 只存在于 HTML 的 href 值里。
+
+### label / group
+
+- `product_N_image`：`label` 为 `产品N图片`，`group` 为 `商品区域`。
+- `product_N_logo_image`：`label` 为 `产品N Logo`，`group` 为 `商品区域`。
+- `product_N_cta`：`label` 为 `产品N按钮跳转`，`group` 为 `跳转区域`。
+- `required` 默认 `true`。
+
+## 5. 交付前校验
+
+完成后必须检查：
+
+- HTML 中没有重复插入跟踪脚本。
+- HTML 中没有 `PRODUCT_LINK`、`{{PRODUCT_LINK_`、`{{product_N_cta}}` 这类错误链接占位符。
+- 所有跳转链接占位符都符合 `href="{{ads}}product_N_cta"`，且整个 href 值只有这一段。
+- 没有把 `<link rel="stylesheet">`、`<script src>`、favicon、站内 footer 链接替换成 CTA。
+- 每个 HTML 占位符都能在 `lp_config.json` 找到对应 key。
+- `lp_config.json` 没有多余 key。
+- `lp_config.json` 的每个对象只包含 `key`、`label`、`type`、`required`、`group`。
+- `lp_config.json` 不能包含 `sortOrder`、`defaultValue` 或任何其他字段。
+- `lp_config.json` 可以被 Node `JSON.parse` 成功解析，且 `Array.isArray(config) === true`。
+- 未能可靠归属的图片或链接保持原样。
+
+建议用这些检查命令辅助验收：
+
+```bash
+rg -n "PRODUCT_LINK|\\{\\{product_[0-9]+_cta\\}\\}|\\{\\{ads\\}\\}\\{|\\{\\{ads\\}\\}\\s" page.html
+node -e "const fs=require('fs'); const cfg=JSON.parse(fs.readFileSync('lp_config.json','utf8')); if(!Array.isArray(cfg)) throw new Error('lp_config must be array'); console.log(cfg.length)"
+```

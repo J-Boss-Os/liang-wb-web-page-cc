@@ -1,7 +1,7 @@
 ---
 name: clone-page
 description: 给目标网页地址和本地dir名字，实现克隆到本地
-arguments: target-url output-dir args
+arguments: target-url output-dir refactor-type args
 ---
 
 - 使用浏览器打开目标网站，确认下这个网站是否被人机验证拦截
@@ -21,9 +21,20 @@ SKILL(clean-page) output-dir
 ```
 ```skill
 SKILL(tracker-page) output-dir
+```
+
+- 根据 refactor-type 参数调用对应的 refactor skill：
+  -  refactor-type 是 "anytrack"，调用 `SKILL(refactor-page-anytrack) output-dir`
+  -  refactor-type 是 "default"，调用 `SKILL(refactor-page-default) output-dir`
+  -  refactor-type 是 "details"，调用 `SKILL(refactor-page-details) output-dir`
+  - 未指定 refactor-type，默认使用 `SKILL(refactor-page-default) output-dir`
 
 ```skill
-SKILL(refactor-page) output-dir
+SKILL(normalize-page-links) output-dir
+```
+
+```skill
+SKILL(validate-thymeleaf-page) output-dir
 ```
 
 - 页面清洗，替换完成之后，需要浏览器打开本地页面截长图，和目标网页截长图进行对比。

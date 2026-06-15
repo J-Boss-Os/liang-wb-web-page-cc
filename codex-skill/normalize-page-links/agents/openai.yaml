@@ -1,0 +1,4 @@
+interface:
+  display_name: "页面链接规范化"
+  short_description: "规范页脚政策链接，并替换文案中的原站域名"
+  default_prompt: "使用 $normalize-page-links 规范化页面政策链接并替换文案中的原站域名。"

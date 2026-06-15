@@ -1,0 +1,9 @@
+[
+  {
+    "key": "product_1_cta",
+    "label": "产品1按钮跳转",
+    "type": "URL",
+    "required": true,
+    "group": "跳转区域"
+  }
+]
